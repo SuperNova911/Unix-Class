@@ -7,10 +7,11 @@ int main(int argc, char *argv[])
     extern int optind, opterr, optopt;
 
     int option;
+
     char *key;
     char *plain;
-
-    strlen()
+    char *padding;
+    int plainLength, paddingLength, keyLength;
 
     while ((option = getopt(argc, argv, "nso:l:h")) != -1)
     {
@@ -42,5 +43,14 @@ int main(int argc, char *argv[])
         }
     }
 
+    keyLength = strlen(key);
+    plainLength = strlen(plain);
+    paddingLength = plainLength % keyLength;
 
+    for (int index = 0; index < paddingLength; index++)
+    {
+        strcat(plainLength, )
+    }
+
+    return 0;
 }

@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#define MAX_SIZE 4096
+
 int main(int argc, char *argv[])
 {
     extern char *optarg;
@@ -9,8 +11,12 @@ int main(int argc, char *argv[])
     int option;
 
     char *key;
-    char *plain;
-    char *padding;
+    char *plain = malloc(sizeof(char) * MAX_SIZE);
+    char *padding = 127;
+    
+    key = "dev-c";
+    strcpy(plain, "this is sample");
+        
     int plainLength, paddingLength, keyLength;
 
     while ((option = getopt(argc, argv, "nso:l:h")) != -1)
@@ -42,15 +48,35 @@ int main(int argc, char *argv[])
                 break;
         }
     }
+    
 
     keyLength = strlen(key);
     plainLength = strlen(plain);
-    paddingLength = plainLength % keyLength;
-
-    for (int index = 0; index < paddingLength; index++)
+    paddingLength = keyLength - (plainLength % keyLength);
+    
+	int index;
+    for (index = 0; index < paddingLength; index++)
     {
-        strcat(plainLength, )
+        strcat(plain, &padding);
     }
+    
+    
+    printf("%s", plain);
+    printf("\n");
+    
+    for (index = 0; index < 20; index++)
+    {
+    	printf("%3d ", plain[index]);
+	}
+	printf("\n");
+	
+    for (index = 0; index < 20; index++)
+    {
+    	printf("%3c ", plain[index]);
+	}
+	printf("\n");
+    
+    
 
     return 0;
 }

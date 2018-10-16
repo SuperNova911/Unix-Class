@@ -1,15 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <unistd.h>
 
-#define MAX_SIZE 4096
+#define MAX_SIZE 8192
 
 enum Mode { None, Encryption, Decryption };
 
-void Encrypt(const char * key, const char * padding, const char * input, char * cipher);
-void Decrypt(const char * key, const char * padding, const char * input, char * plain);
+void Encrypt(const char *key, const char *input, char *cipher);
+void Decrypt(const char *key, const char *input, char *plain);
 
 int main(int argc, char *argv[])
 {
@@ -19,42 +18,42 @@ int main(int argc, char *argv[])
     int option;
 
     enum Mode cryptMode = None;
-    char * inputFileName = "";
-    char * outputFileName = "";
-    char * key = "";
+    char *inputFileName = "";
+    char *outputFileName = "";
+    char *key = "";
 
-    while ((option = getopt(argc, argv, "f:cdk:o:")) != -1)
+    while ((option = getopt(argc, argv, "f:o:k:cd")) != -1)
     {
         switch (option)
         {
-            // file name
-        case 'f':
-            inputFileName = optarg;
-            break;
+            // Input file name
+            case 'f':
+                inputFileName = optarg;
+                break;
 
-            // encryption
-        case 'c':
-            cryptMode = Encryption;
-            break;
+            // Output file name
+            case 'o':
+                outputFileName = optarg;
+                break;
 
-            // decryption
-        case 'd':
-            cryptMode = Decryption;
-            break;
+            // Vigenere key
+            case 'k':
+                key = optarg;
+                break;
 
-            // key
-        case 'k':
-            key = optarg;
-            break;
+            // Encryption mode
+            case 'c':
+                cryptMode = Encryption;
+                break;
 
-            // output
-        case 'o':
-            outputFileName = optarg;
-            break;
+            // Decryption mode
+            case 'd':
+                cryptMode = Decryption;
+                break;
 
-            // invalid option
-        default:
-            return -1;
+            // Invalid option
+            default:
+                return -1;
         }
     }
 
@@ -76,12 +75,6 @@ int main(int argc, char *argv[])
     }
     fclose(fileStream);
 
-    char plain[MAX_SIZE] = "";
-    char cipher[MAX_SIZE] = "";
-    char padding[2];
-    padding[0] = 127;
-    padding[1] = 0;
-
     // Create output file
     fileStream = fopen(outputFileName, "w");
     if (fileStream == NULL)
@@ -90,60 +83,42 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    // Encryption/Decryption and export to output file
+    char plain[MAX_SIZE] = "";
+    char cipher[MAX_SIZE] = "";
     switch (cryptMode)
     {
-    // Invaild mode
-    case None:
-        return -1;
+        // Invaild mode
+        case None:
+            return -1;
 
-    // Encrypt
-    case Encryption:
-        strcat(plain, input);
-        Encrypt(key, padding, input, cipher);
-        fputs(cipher, fileStream);
-        break;
+        // Encrypt
+        case Encryption:
+            strcat(plain, input);
+            Encrypt(key, input, cipher);
+            fputs(cipher, fileStream);
+            break;
 
-    // Decrypt
-    case Decryption:
-        strcat(cipher, input);
-        Decrypt(key, padding, input, plain);
-        fputs(plain, fileStream);
-        break;
+        // Decrypt
+        case Decryption:
+            strcat(cipher, input);
+            Decrypt(key, input, plain);
+            fputs(plain, fileStream);
+            break;
     }
     fclose(fileStream);
 
     return 0;
 }
 
-void Encrypt(const char * key, const char * padding, const char * input, char * cipher)
+void Encrypt(const char *key, const char *input, char *cipher)
 {
-    char * plain = (char *)input;
-
-    int keyLength = strlen(key);
-    int plainLength = strlen(plain);
-    int paddingSize;
-
-    // Calculate padding size
-    if (plainLength < keyLength)
-        paddingSize = keyLength - plainLength;
-    else
-    {
-        if ((plainLength % keyLength) == 0)
-            paddingSize = 0;
-        else
-            paddingSize = keyLength - (plainLength % keyLength);
-    }
-    printf("paddingSize: %d\n", paddingSize);
-
-    // Add padding
-    for (int i = 0; i < paddingSize; i++)
-    {
-        strcat(plain, padding);
-    }
-    plainLength = strlen(plain);
-    printf("%s\n", plain);
+    char plain[MAX_SIZE] = "";
+    strcpy(plain, input);
 
     // Generate key
+    int keyLength = strlen(key);
+    int plainLength = strlen(plain);
     char fullKey[MAX_SIZE] = "";
     while (strlen(fullKey) < plainLength)
     {
@@ -151,7 +126,7 @@ void Encrypt(const char * key, const char * padding, const char * input, char * 
     }
 
     // Vigenere Encryption
-    int asciiStartIndex = 0;
+    int asciiStartIndex = 1;
     int asciiEndIndex = 127;
     int asciiPoolLength = asciiEndIndex - asciiStartIndex + 1;
     int encrypted = 0;
@@ -173,14 +148,13 @@ void Encrypt(const char * key, const char * padding, const char * input, char * 
     }
 }
 
-
-void Decrypt(const char * key, const char * padding, const char * input, char * plain)
+void Decrypt(const char *key, const char *input, char *plain)
 {
-    char * cipher = (char *)input;
-
-    int cipherLength = strlen(cipher);
+    char cipher[MAX_SIZE];
+    strcpy(cipher, input);
 
     // Generate Key
+    int cipherLength = strlen(cipher);
     char fullKey[MAX_SIZE] = "";
     while (strlen(fullKey) < cipherLength)
     {
@@ -188,10 +162,11 @@ void Decrypt(const char * key, const char * padding, const char * input, char * 
     }
 
     // Vigenere Decryption
-    int asciiStartIndex = 0;
+    int asciiStartIndex = 1;
     int asciiEndIndex = 127;
     int asciiPoolLength = asciiEndIndex - asciiStartIndex + 1;
     int decrypted = 0;
+    int plainIndex = 0;
     for (int index = 0; index < cipherLength; index++)
     {
         decrypted = cipher[index];
@@ -205,21 +180,8 @@ void Decrypt(const char * key, const char * padding, const char * input, char * 
         decrypted %= asciiPoolLength;
         decrypted += asciiStartIndex;
 
-        plain[index] = decrypted;
+        plain[plainIndex] = decrypted;
+        plainIndex++;
         decrypted = 0;
     }
-
-    // Remove padding
-    int plainLength = strlen(plain);
-    int paddingIndex;
-    for (paddingIndex = 0; paddingIndex < plainLength; paddingIndex++)
-    {
-        // Padding detection
-        if (plain[paddingIndex] == padding[0])
-            break;
-    }
-    printf("'%s'\n", plain);
-    plain[paddingIndex] = 0;
-
-    printf("'%s'\n", plain);
 }

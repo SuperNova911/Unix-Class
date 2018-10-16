@@ -1,3 +1,9 @@
+/*
+ * Unix Lab3
+ * Author: Suwhan Kim
+ * Student ID : 201510743
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

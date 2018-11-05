@@ -1,20 +1,21 @@
 /*
  * Unix Lab4
  * Author: Suwhan Kim
- * Student ID : 201510743
+ * Student ID: 201510743
  */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 #include <math.h>
+#include <fcntl.h>
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/mman.h>
 
-#define MAX_SIZE 8192
 #define MAX_PROCESS_NUMBER 32
 
 enum Mode { None, Encryption, Decryption };
@@ -28,22 +29,16 @@ int main(int argc, char *argv[])
 
     enum Mode cryptMode = None;
     char *inputFileName = "";
-    char *outputFileName = "";
     char *key = "";
     int numberOfProcess = 1;
 
-    while ((option = getopt(argc, argv, "cdf:k:o:p:")) != -1)
+    while ((option = getopt(argc, argv, "cdf:k:p:")) != -1)
     {
         switch (option)
         {
             // Input file name
             case 'f':
                 inputFileName = optarg;
-                break;
-
-            // Output file name
-            case 'o':
-                outputFileName = optarg;
                 break;
             
             // Vigenere key
@@ -88,78 +83,33 @@ int main(int argc, char *argv[])
     }
 
     // Open input file
-    // FILE *fileStream;
-    // fileStream = fopen(inputFileName, "r");
-    // if (fileStream == NULL)
-    // {
-    //     printf("multicipher: failed to open input file, FileName: %s\n", inputFileName);
-    //     return 0;
-    // }
-    int fileDes;
-    if ((fileDes = open(inputFileName, O_RDWR)) == -1)
+    int fileDescriptor;
+    if ((fileDescriptor = open(inputFileName, O_RDWR)) == -1)
     {
         printf("multicipher: failed to open input file, FileName: %s\n", inputFileName);
         return 0;
     }
 
     // Read input file
-    // char input[MAX_SIZE] = "";
-    // char buffer[MAX_SIZE] = "";
-    // while (fgets(buffer, sizeof(buffer), fileStream) != NULL)
-    // {
-    //     strcat(input, buffer);
-    // }
-    // fclose(fileStream);
     caddr_t address;
-    address = mmap(NULL, statBuffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileDes, (0ff_t)0);
+    address = mmap(NULL, statBuffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, (off_t)0);
     if (address == MAP_FAILED)
     {
         printf("multicipher: memory mapping failed\n");
         return 0;
     }
-    close (fileDes);
-
-    // Split input file
-    int inputLength = strlen(input);
-    int keyLength = strlen(key);
-    int pivot1 = 0, pivot2 = 0;
-    char splited[MAX_SIZE] = "";
-    char tempFileName[MAX_PROCESS_NUMBER][256];
-
-    for (int index = 0; index < numberOfProcess; index++)
-    {
-        // Split string
-        pivot2 = (int)round((inputLength / (float)numberOfProcess * (float)(index + 1)));
-        while ((pivot2 - pivot1) % keyLength != 0 && pivot2 < inputLength - 1)
-        {
-            pivot2++;
-        }
-        memcpy(splited, &input[pivot1], pivot2 - pivot1);
-        splited[pivot2 - pivot1] = '\0';
-        pivot1 = pivot2;
-
-        // Write to splited file
-        sprintf(tempFileName[index], "%s%02d", outputFileName, index);
-        fileStream = fopen(tempFileName[index], "w");
-        if (fileStream == NULL)
-        {
-            printf("multicipher: failed to create temp file\n");
-            return 0;
-        }
-        fputs(splited, fileStream);
-        fclose(fileStream);
-    }
+    close (fileDescriptor);
 
     // Argument for vigenere program
-    char *childArgv[9] = { "./vigenere", "vigenere", "-f", "input", "-o", "output", "-k", key, "mode" };
+    char *childArgv[12] = { "vigenere", "vigenere", "-f", inputFileName, "-s", "startIndex", "-e", "endIndex", "-k", key, "mode", NULL };
     switch (cryptMode)
     {
         case Encryption:
-            childArgv[8] = "-c";
+            childArgv[10] = "-c";
             break;
 
         case Decryption:
-            childArgv[8] = "-d";
+            childArgv[10] = "-d";
             break;
 
         default:
@@ -167,20 +117,38 @@ int main(int argc, char *argv[])
             return 0;
     }
 
-    // Multi processing
+    int inputLength = statBuffer.st_size;
+    int keyLength = strlen(key);
+    int pivot1 = 0, pivot2 = 0;
+    char argStartIndex[sizeof(int) * 4 + 1];
+    char argEndIndex[sizeof(int) * 4 + 1];
     pid_t pid[MAX_PROCESS_NUMBER];
     for (int index = 0; index < numberOfProcess; index++)
     {
+        pivot2 = (int)round((inputLength / (float)numberOfProcess * (float)(index + 1)));
+        while ((pivot2 - pivot1 + 1) % keyLength != 0 && pivot2 < inputLength - 1)
+        {
+            pivot2++;
+        }
+
         pid[index] = fork();
 
         // Assign task to child
         if (pid[index] == 0)
         {
-            childArgv[3] = tempFileName[index];
-            childArgv[5] = tempFileName[index];
+	    sprintf(argStartIndex, "%d", pivot1);
+            childArgv[5] = argStartIndex;
+	    sprintf(argEndIndex, "%d", pivot2);
+            childArgv[7] = argEndIndex;
 
-            execv("./vigenere", childArgv);
+            if (execv("vigenere", childArgv) == -1)
+	    {
+		perror("exec");
+		exit(1);
+	    }
         }
+
+	pivot1 = pivot2 + 1;
     }
 
     // Wait for task complete
@@ -192,39 +160,13 @@ int main(int argc, char *argv[])
         // Child process does not finished normally
         if (status[index] != 0)
         {
+	    printf("%d\n", status[index]);
             printf("multicipher: something went wrong from vigenere, pid: %d\n", pid[index]);
             return 0;
         }
     }
 
-    // Merge splited file
-    char workResult[MAX_SIZE] = "";
-    for (int index = 0; index < numberOfProcess; index++)
-    {
-        fileStream = fopen(tempFileName[index], "r");
-        if (fileStream == NULL)
-        {
-            printf("multicipher: failed to open temp file, FileName: %s\n", tempFileName[index]);
-            return 0;
-        }
-
-        while (fgets(buffer, sizeof(buffer), fileStream) != NULL)
-        {
-            strcat(workResult, buffer);
-        }
-        fclose(fileStream);
-        remove(tempFileName[index]);
-    }
-
-    // Create output file
-    fileStream = fopen(outputFileName, "w");
-    if (fileStream == NULL)
-    {
-        printf("multicipher: failed to create output file, FileName: %s\n", outputFileName);
-        return 0;
-    }
-    fputs(workResult, fileStream);
-    fclose(fileStream);
+    msync(address, inputLength, MS_SYNC);
 
     return 0;
 }

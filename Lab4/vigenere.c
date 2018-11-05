@@ -1,20 +1,26 @@
 /*
  * Unix Lab4
  * Author: Suwhan Kim
- * Student ID : 201510743
+ * Student ID: 201510743
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
-#define MAX_SIZE 8192
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
+
+#define ASCII_START_INDEX 1
+#define ASCII_END_INDEX 126
 
 enum Mode { None, Encryption, Decryption };
 
-void Encrypt(const char *key, const char *input, char *cipher);
-void Decrypt(const char *key, const char *input, char *plain);
+void Encrypt(const char *key, caddr_t address, int startIndex, int endIndex);
+void Decrypt(const char *key, caddr_t address, int startIndex, int endIndex);
 
 int main(int argc, char *argv[])
 {
@@ -24,22 +30,28 @@ int main(int argc, char *argv[])
     int option;
 
     enum Mode cryptMode = None;
-    char *inputFileName = "";
-    char *outputFileName = "";
+    char *inputFileName;
+    int startIndex = 0;
+    int endIndex = 0;
     char *key = "";
 
-    while ((option = getopt(argc, argv, "f:o:k:cd")) != -1)
+    while ((option = getopt(argc, argv, "f:s:e:k:cd")) != -1)
     {
         switch (option)
         {
-            // Input file name
+            // Input file
             case 'f':
                 inputFileName = optarg;
                 break;
 
-            // Output file name
-            case 'o':
-                outputFileName = optarg;
+            // Start index
+            case 's':
+                startIndex = atoi(optarg);
+                break;
+                
+            // End index
+            case 'e':
+                endIndex = atoi(optarg);
                 break;
 
             // Vigenere key
@@ -59,135 +71,122 @@ int main(int argc, char *argv[])
 
             // Invalid option
             default:
+		printf("Invalid option\n");
+		printf("%c, %s\n", option, optarg);
                 return -1;
         }
     }
 
-    // Open input file
-    FILE *fileStream;
-    fileStream = fopen(inputFileName, "r");
-    if (fileStream == NULL)
+    // Get stat info
+    struct stat statBuffer;
+    if (stat(inputFileName, &statBuffer) == -1)
     {
-        printf("vigenere: failed to open file, FileName: %s\n", inputFileName);
+        printf("vigenere: failed to get stat information, FileName: %s\n", inputFileName);
         return -1;
     }
 
-    // Read file
-    char input[MAX_SIZE] = "";
-    char buffer[MAX_SIZE] = "";
-    while (fgets(buffer, sizeof(buffer), fileStream) != NULL)
+    int fileDescriptor;
+    if ((fileDescriptor = open(inputFileName, O_RDWR)) == -1)
     {
-        strcat(input, buffer);
-    }
-    fclose(fileStream);
-
-    // Create output file
-    fileStream = fopen(outputFileName, "w");
-    if (fileStream == NULL)
-    {
-        printf("vigenere: failed to create file, FileName: %s\n", outputFileName);
+        printf("vigenere: failed to open input file, FileName: %s\n", inputFileName);
         return -1;
     }
 
-    // Encryption/Decryption and export to output file
-    char plain[MAX_SIZE] = "";
-    char cipher[MAX_SIZE] = "";
+    caddr_t address;
+    address = mmap(NULL, statBuffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, (off_t)0);
+    if (address == MAP_FAILED)
+    {
+        printf("vigenere: memory mapping failed\n");
+        return -1;
+    }
+    close (fileDescriptor);
+
+    // Encryption/Decryption
     switch (cryptMode)
     {
         // Invaild mode
         case None:
+	    printf("vigenere: invalid mode\n");
             return -1;
 
         // Encrypt
         case Encryption:
-            strcat(plain, input);
-            Encrypt(key, input, cipher);
-            fputs(cipher, fileStream);
+            Encrypt(key, address, startIndex, endIndex);
             break;
 
         // Decrypt
         case Decryption:
-            strcat(cipher, input);
-            Decrypt(key, input, plain);
-            fputs(plain, fileStream);
+            Decrypt(key, address, startIndex, endIndex);
             break;
     }
-    fclose(fileStream);
 
     return 0;
 }
 
-void Encrypt(const char *key, const char *input, char *cipher)
+void Encrypt(const char *key, caddr_t address, int startIndex, int endIndex)
 {
-    char plain[MAX_SIZE] = "";
-    strcpy(plain, input);
-
     // Generate key
+    int inputLength = endIndex + 1;
     int keyLength = strlen(key);
-    int plainLength = strlen(plain);
-    char fullKey[MAX_SIZE] = "";
-    while (strlen(fullKey) < plainLength)
+    char *fullKey = (char *)malloc(inputLength + keyLength + 1);
+    while (strlen(fullKey) < inputLength)
     {
         strcat(fullKey, key);
     }
 
     // Vigenere Encryption
-    int asciiStartIndex = 1;
-    int asciiEndIndex = 127;
-    int asciiPoolLength = asciiEndIndex - asciiStartIndex + 1;
-    int encrypted = 0;
-    for (int index = 0; index < plainLength; index++)
+    int asciiPoolLength = ASCII_END_INDEX - ASCII_START_INDEX + 1;
+    int encryptedChar = 0;
+    for (int index = startIndex; index <= endIndex; index++)
     {
-        encrypted = plain[index];
-        encrypted -= asciiStartIndex;
-        encrypted += fullKey[index];
+        encryptedChar = address[index];
+        encryptedChar -= ASCII_START_INDEX;
+        encryptedChar += fullKey[index];
 
-        while (encrypted < asciiPoolLength)
+        while (encryptedChar < asciiPoolLength)
         {
-            encrypted += asciiPoolLength;
+            encryptedChar += asciiPoolLength;
         }
-        encrypted %= (asciiEndIndex - asciiStartIndex + 1);
-        encrypted += asciiStartIndex;
+        encryptedChar %= (ASCII_END_INDEX - ASCII_START_INDEX + 1);
+        encryptedChar += ASCII_START_INDEX;
 
-        cipher[index] = encrypted;
-        encrypted = 0;
+        address[index] = encryptedChar;
+        encryptedChar = 0;
     }
+
+    free(fullKey);
 }
 
-void Decrypt(const char *key, const char *input, char *plain)
+void Decrypt(const char *key, caddr_t address, int startIndex, int endIndex)
 {
-    char cipher[MAX_SIZE];
-    strcpy(cipher, input);
-
     // Generate Key
-    int cipherLength = strlen(cipher);
-    char fullKey[MAX_SIZE] = "";
-    while (strlen(fullKey) < cipherLength)
+    int inputLength = endIndex + 1;
+    int keyLength = strlen(key);
+    char *fullKey = (char *)malloc(inputLength + keyLength + 1);
+    while (strlen(fullKey) < inputLength)
     {
         strcat(fullKey, key);
     }
 
     // Vigenere Decryption
-    int asciiStartIndex = 1;
-    int asciiEndIndex = 127;
-    int asciiPoolLength = asciiEndIndex - asciiStartIndex + 1;
-    int decrypted = 0;
-    int plainIndex = 0;
-    for (int index = 0; index < cipherLength; index++)
+    int asciiPoolLength = ASCII_END_INDEX - ASCII_START_INDEX + 1;
+    int decryptedChar = 0;
+    for (int index = startIndex; index <= endIndex; index++)
     {
-        decrypted = cipher[index];
-        decrypted -= asciiStartIndex;
-        decrypted -= fullKey[index];
+        decryptedChar = address[index];
+        decryptedChar -= ASCII_START_INDEX;
+        decryptedChar -= fullKey[index];
 
-        while (decrypted < asciiPoolLength)
+        while (decryptedChar < asciiPoolLength)
         {
-            decrypted += asciiPoolLength;
+            decryptedChar += asciiPoolLength;
         }
-        decrypted %= asciiPoolLength;
-        decrypted += asciiStartIndex;
+        decryptedChar %= asciiPoolLength;
+        decryptedChar += ASCII_START_INDEX;
 
-        plain[plainIndex] = decrypted;
-        plainIndex++;
-        decrypted = 0;
+        address[index] = decryptedChar;
+        decryptedChar = 0;
     }
+
+    free(fullKey);
 }

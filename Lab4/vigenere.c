@@ -29,12 +29,12 @@ int main(int argc, char *argv[])
 
     int option;
 
+    // Get options
     enum Mode cryptMode = None;
     char *inputFileName;
     int startIndex = 0;
     int endIndex = 0;
     char *key = "";
-
     while ((option = getopt(argc, argv, "f:s:e:k:cd")) != -1)
     {
         switch (option)
@@ -71,13 +71,12 @@ int main(int argc, char *argv[])
 
             // Invalid option
             default:
-		printf("Invalid option\n");
-		printf("%c, %s\n", option, optarg);
+		        printf("vigenere: invalid option\n");
                 return -1;
         }
     }
 
-    // Get stat info
+    // Get input file stat info
     struct stat statBuffer;
     if (stat(inputFileName, &statBuffer) == -1)
     {
@@ -85,6 +84,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    // Open input file
     int fileDescriptor;
     if ((fileDescriptor = open(inputFileName, O_RDWR)) == -1)
     {
@@ -92,6 +92,7 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    // Memory mapping input file
     caddr_t address;
     address = mmap(NULL, statBuffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, (off_t)0);
     if (address == MAP_FAILED)
@@ -106,7 +107,7 @@ int main(int argc, char *argv[])
     {
         // Invaild mode
         case None:
-	    printf("vigenere: invalid mode\n");
+	        printf("vigenere: invalid mode\n");
             return -1;
 
         // Encrypt
@@ -123,9 +124,10 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+// Vigenere encryption
 void Encrypt(const char *key, caddr_t address, int startIndex, int endIndex)
 {
-    // Generate key
+    // Generate key for encryption
     int inputLength = endIndex + 1;
     int keyLength = strlen(key);
     char *fullKey = (char *)malloc(inputLength + keyLength + 1);
@@ -134,7 +136,7 @@ void Encrypt(const char *key, caddr_t address, int startIndex, int endIndex)
         strcat(fullKey, key);
     }
 
-    // Vigenere Encryption
+    // Vigenere encryption logic
     int asciiPoolLength = ASCII_END_INDEX - ASCII_START_INDEX + 1;
     int encryptedChar = 0;
     for (int index = startIndex; index <= endIndex; index++)
@@ -157,9 +159,10 @@ void Encrypt(const char *key, caddr_t address, int startIndex, int endIndex)
     free(fullKey);
 }
 
+// Vigenere decryption
 void Decrypt(const char *key, caddr_t address, int startIndex, int endIndex)
 {
-    // Generate Key
+    // Generate Key for decryption
     int inputLength = endIndex + 1;
     int keyLength = strlen(key);
     char *fullKey = (char *)malloc(inputLength + keyLength + 1);
@@ -168,7 +171,7 @@ void Decrypt(const char *key, caddr_t address, int startIndex, int endIndex)
         strcat(fullKey, key);
     }
 
-    // Vigenere Decryption
+    // Vigenere decryption logic
     int asciiPoolLength = ASCII_END_INDEX - ASCII_START_INDEX + 1;
     int decryptedChar = 0;
     for (int index = startIndex; index <= endIndex; index++)

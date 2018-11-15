@@ -27,11 +27,11 @@ int main(int argc, char *argv[])
 
     int option;
 
+    // Get options
     enum Mode cryptMode = None;
     char *inputFileName = "";
     char *key = "";
     int numberOfProcess = 1;
-
     while ((option = getopt(argc, argv, "cdf:k:p:")) != -1)
     {
         switch (option)
@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    // Get stat info
+    // Get input file stat info
     struct stat statBuffer;
     if (stat(inputFileName, &statBuffer) == -1)
     {
@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    // Read input file
+    // Memory mapping input file
     caddr_t address;
     address = mmap(NULL, statBuffer.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileDescriptor, (off_t)0);
     if (address == MAP_FAILED)
@@ -125,6 +125,7 @@ int main(int argc, char *argv[])
     pid_t pid[MAX_PROCESS_NUMBER];
     for (int index = 0; index < numberOfProcess; index++)
     {
+        // Calculate working index for child process
         pivot2 = (int)round((inputLength / (float)numberOfProcess * (float)(index + 1)));
         while ((pivot2 - pivot1 + 1) % keyLength != 0 && pivot2 < inputLength - 1)
         {
@@ -136,19 +137,18 @@ int main(int argc, char *argv[])
         // Assign task to child
         if (pid[index] == 0)
         {
-	    sprintf(argStartIndex, "%d", pivot1);
+	        sprintf(argStartIndex, "%d", pivot1);
             childArgv[5] = argStartIndex;
-	    sprintf(argEndIndex, "%d", pivot2);
+	        sprintf(argEndIndex, "%d", pivot2);
             childArgv[7] = argEndIndex;
 
             if (execv("vigenere", childArgv) == -1)
-	    {
-		perror("exec");
-		exit(1);
-	    }
+	        {
+		        perror("exec");
+		        return 0;
+	        }
         }
-
-	pivot1 = pivot2 + 1;
+	    pivot1 = pivot2 + 1;
     }
 
     // Wait for task complete
@@ -160,12 +160,13 @@ int main(int argc, char *argv[])
         // Child process does not finished normally
         if (status[index] != 0)
         {
-	    printf("%d\n", status[index]);
+	        printf("%d\n", status[index]);
             printf("multicipher: something went wrong from vigenere, pid: %d\n", pid[index]);
             return 0;
         }
     }
 
+    // Sync memory
     msync(address, inputLength, MS_SYNC);
 
     return 0;

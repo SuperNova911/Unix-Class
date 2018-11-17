@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <fcntl.h>
+#include <stdbool.h>
 
 #define PORT 10743
 #define LOG_FILE "server.log"
@@ -32,6 +33,7 @@ struct ChatRoom
     char roomName[64];
     char password[64];
     int userList[MAX_CHAT_USER];
+    bool isValid;
 };
 
 struct DataPack
@@ -44,15 +46,15 @@ struct DataPack
     char message[252];
 };
 
-int receiveRequest(int sender, struct DataPack *dataPack);
+void resetChatRoom();
 
+int receiveRequest(int sender, struct DataPack *dataPack);
 int sendChatRoomList(int receiver);
 int joinChatRoom(int receiver, char *roomName, char *userName, char *password);
 int quitChatRoom(int receiver, char *roomName, char *userName);
 int createChatRoom(int receiver, char *roomName, char *userName, char *password);
 int removeChatRoom(int receiver, char *roomName, char *password);
 int sendMessage(char *userName, char *message);
-
 int responseDataPack(int receiver, struct DataPack *dataPack);
 
 
@@ -126,6 +128,12 @@ int main(int argc, char *argv[])
     FD_SET(serverSocket, &master);
     fdmax = serverSocket;
 
+    resetChatRoom();
+    strncpy(ChatRoomList[0].roomName, "Room1(public)", sizeof(ChatRoomList[0].roomName) - 1);
+    ChatRoomList[0].isValid = true;
+    strncpy(ChatRoomList[1].roomName, "Room2(private)", sizeof(ChatRoomList[0].roomName) - 1);
+    strncpy(ChatRoomList[1].password, "123", sizeof(ChatRoomList[0].password) - 1);
+    ChatRoomList[1].isValid = true;
 
     while (1)
     {
@@ -216,6 +224,18 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+void resetChatRoom()
+{
+    for (int index = 0; index < MAX_CHAT_ROOM; index++)
+    {
+        ChatRoomList[index].roomName[0] = 0;
+        ChatRoomList[index].password[0] = 0;
+        for (int userIndex = 0; userIndex < MAX_CHAT_USER; userIndex++)
+            ChatRoomList[index].userList[userIndex] = -1;
+        ChatRoomList[index].isValid = false;
+    }
+}
+
 int receiveRequest(int sender, struct DataPack *dataPack)
 {
     printf("command: '%d'\ndata1: '%s'\ndata2: '%s'\ndata3: '%s'\ndata4: '%s'\nmessage: '%s'\n",
@@ -249,7 +269,14 @@ int receiveRequest(int sender, struct DataPack *dataPack)
 
 int sendChatRoomList(int receiver)
 {
-    char *roomList = "1번방(공개), 2번방(비공개), 3번방(공개), 4번방(공개)";
+    char roomList[256] = "dja: ";
+    for (int index = 0; index < MAX_CHAT_ROOM; index++)
+    {
+        if (ChatRoomList[index].isValid == true)
+        {
+            sprintf(roomList, "%s %s", roomList, ChatRoomList[index].roomName);
+        }
+    }
 
     struct DataPack dataPack;
     dataPack.command = ResponseChatRoomList;
@@ -260,19 +287,32 @@ int sendChatRoomList(int receiver)
 
 int joinChatRoom(int receiver, char *roomName, char *userName, char *password)
 {
-    char *message = "채팅방 접속";
-
     struct DataPack dataPack;
     dataPack.command = ResponseJoinChatRoom;
-    strncpy(dataPack.data1, roomName, sizeof(dataPack.data1) - 1);
-    strncpy(dataPack.message, message, sizeof(dataPack.message) - 1);
 
+    for (int index = 0; index < MAX_CHAT_ROOM; index++)
+    {
+        if (ChatRoomList[index].isValid && strcmp(ChatRoomList[index].roomName, roomName) == 0 && strcmp(ChatRoomList[index].password, password) == 0)
+        {
+            strncpy(dataPack.data1, ChatRoomList[index].roomName, sizeof(dataPack.data1) - 1);
+            dataPack.data4[0] = 1;
+            strncpy(dataPack.message, "Join chat room", sizeof(dataPack.message) - 1);
+
+            responseDataPack(receiver, &dataPack);
+            return 0;
+        }
+    }
+
+    strncpy(dataPack.data1, "", sizeof(dataPack.data1) - 1);
+    dataPack.data4[0] = 0;
+    strncpy(dataPack.message, "Cannot join chat room, please check room name or password", sizeof(dataPack.message) - 1);
     responseDataPack(receiver, &dataPack);
+    return -1;
 }
 
 int quitChatRoom(int receiver, char *roomName, char *userName)
 {
-    char *message = "채팅방 나가기";
+    char *message = "Quite chat room";
 
     struct DataPack dataPack;
     dataPack.command = ResponseQuitChatRoom;
@@ -299,7 +339,7 @@ int createChatRoom(int receiver, char *roomName, char *userName, char *password)
     //         ChatRoomList[index] = newChatRoom;
     //     }
     // }
-    char *message = "새로운 채팅방 생성";
+    char *message = "Create new chat room";
 
     struct DataPack dataPack;
     dataPack.command = ResponseCreateChatRoom;
@@ -311,7 +351,7 @@ int createChatRoom(int receiver, char *roomName, char *userName, char *password)
 
 int removeChatRoom(int receiver, char *roomName, char *password)
 {
-    char *message = "채팅방 삭제";
+    char *message = "Remove chat room";
 
     struct DataPack dataPack;
     dataPack.command = ResponseRemoveChatRoom;
@@ -489,4 +529,5 @@ int responseDataPack(int receiver, struct DataPack *dataPack)
 //             printf("no\n");
 //     }
 // }
+
 

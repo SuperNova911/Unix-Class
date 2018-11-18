@@ -1,3 +1,9 @@
+/*
+ * Unix FinalUnixLab
+ * Author: Suwhan Kim
+ * Student ID: 201510743
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,28 +15,29 @@
 #include <netinet/in.h>
 #include <ncurses.h>
 
-
 #define PORT 10743
-#define MAX_USERNAME_LENGTH 127
-#define MAX_PASSWORD_LENGTH 127
+#define ADDR "192.168.98.132"
 
+// DataPack 명령어 식별자
 enum Command 
 {
     None,
     RequestChatRoomList, RequestJoinChatRoom, RequestQuitChatRoom,
-    RequestCreateChatRoom, RequestRemoveChatRoom, RequestSendMessage,
+    RequestCreateChatRoom, RequestRemoveChatRoom, RequestSendMessage, RequestConnectLog,
     ResponseChatRoomList, ResponseJoinChatRoom, ResponseQuitChatRoom,
-    ResponseCreateChatRoom, ResponseRemoveChatRoom, ResponseSendMessage
+    ResponseCreateChatRoom, ResponseRemoveChatRoom, ResponseSendMessage, ResponseConnectLog
 };
 
+// 현재 클라이언트 작업 상태
 enum ClientStatus
 {
     Lobby, Chat, GetUserName, GetPassword, GetName
 };
 
+// 서버와 통신에 사용할 데이터 묶음 구조체
 struct DataPack
 {
-    enum Command command;
+    enum Command command;   // 명령어 식별자
     char data1[64];
     char data2[64];
     char data3[64];
@@ -38,22 +45,22 @@ struct DataPack
     char message[252];
 };
 
-// Server
+// 서버
 int connectToServer();
+void onClose();
 
-// Interface
+// 인터페이스
 void initInterface();
 void drawBorder(WINDOW *window);
 void printMessage(WINDOW *window, char *message);
 void printSenderMessage(WINDOW *window, char *message, char *sender);
 
-// Command
+// 사용자 입력 처리
 void receiveCommand();
 void showCommandList();
 void showCustomCommand(char *command, char *inputGuide);
 
-
-// DataPack
+// 서버와 DataPack으로 통신
 int receiveResponse(struct DataPack *dataPack);
 int requestChatRoomList();
 int requestJoinChatRoom(char *roomName, char *userName, char *password);
@@ -61,10 +68,8 @@ int requestQuitChatRoom(char *roomName, char *userName);
 int requestCreateChatRoom(char *roomName, char *password);
 int requestRemoveChatRoom(char *roomName, char *password);
 int requestSendMessage(char *roomName, char *userName, char *message);
+int requestConnectLog();
 int requestDataPack(struct DataPack *dataPack);
-
-// etc
-void onClose();
 
 WINDOW *chatWindow, *commandWindow, *commandInputWindow, *chatWindowBorder, *commandWindowBorder;
 int ServerSocket;
@@ -78,22 +83,57 @@ char userNameBuffer[256];
 char passwordBuffer[256];
 char roomNameBuffer[256];
 
-char currentUserName[256];
-char currentRoomName[256];
+char currentUserName[256];      // 현재 사용자 이름
+char currentRoomName[256];      // 현재 접속중인 채팅방 이름
 
-enum Command currentRequest;
-enum ClientStatus clientStatus;
+enum Command currentRequest;        // 현재 처리중인 요청
+enum ClientStatus clientStatus;     // 현재 클라이언트 작업 상태
 
-int main()
+char *serverAddress = ADDR;
+int serverPort = PORT;
+
+int main(int argc, char *argv[])
 {
+    // argument를 읽어 옴
+    extern char *optarg;
+    int option;
+    while((option = getopt(argc, argv, "a:p:")) != -1)
+    {
+        switch (option)
+        {
+            // 접속할 서버 주소
+            case 'a':
+                serverAddress = optarg;
+                break;
+            
+            // 접속할 서버 포트 번호
+            case 'p':
+                serverPort = atoi(optarg);
+                break;
+            
+            // 잘못된 옵션
+            default:
+                printf("client: invalid option\n");
+                return 0;
+        }
+    }
+
+    // 인터페이스 그리기
     initInterface();
     atexit(onClose);
 
-    connectToServer();
+    // 서버에 접속 시도
+    if (connectToServer() == -1)
+    {
+        // 실패
+        printMessage(chatWindow, "\nCannot connect server");
+        printMessage(chatWindow, "Shutdown in 10 sec");
+        sleep(10);
+        return 0;
+    }
     
     FD_ZERO(&master);
     FD_ZERO(&reader);
-
     FD_SET(fileno(stdin), &master);
     FD_SET(ServerSocket, &master);
     fdmax = ServerSocket;
@@ -101,14 +141,17 @@ int main()
     int readBytes;
     char socketBuffer[512];
     struct DataPack *receivedDataPack;
-
     
     currentRequest = None;
     clientStatus = Lobby;
 
+    // 사용자로부터 입력이 들어오거나 서버로부터 데이터를 주고 받기 시작
     while (1)
     {
+        // 사용자에게 현재 사용 가능한 명령어 목록을 보여줌
         showCommandList();
+
+        // 데이터 입출력 대기
         reader = master;
         if (select(fdmax + 1, &reader, NULL, NULL, NULL) == -1)
         {
@@ -120,9 +163,12 @@ int main()
         {
             if (FD_ISSET(i, &reader))
             {
+                // 서버로부터 데이터를 받음
                 if (i == ServerSocket)
                 {
                     readBytes = recv(ServerSocket, socketBuffer, sizeof(socketBuffer), 0);
+
+                    // 서버와 연결이 끊어짐
                     if (readBytes <= 0)
                     {
                         if (readBytes == 0)
@@ -132,31 +178,33 @@ int main()
                         close(ServerSocket);
                         exit(1);
                     }
+                    // 서버로부터 DataPack을 받음
                     else
                     {
+                        // DataPack을 해석하여 기능 수행
                         receivedDataPack = (struct DataPack *)socketBuffer;
                         receiveResponse(receivedDataPack);
                     }
                 }
+                // 사용자로부터 표준 입력을 읽어옴
                 else if (i == fileno(stdin))
                 {
                     stdInput = getchar();
                 
                     switch (stdInput)
                     {
+                        // 엔터키를 누르면 받은 입력을 해석하여 처리함
                         case 13:
                             receiveCommand();
                             strcpy(stdBuffer, "");
                             break;
         
+                        // 백스페이스
                         case 127:
                             stdBuffer[strlen(stdBuffer) - 1] = 0;
                             break;
 
-                        case EOF:
-                            // receiveCommand();
-                            break;
-        
+                        // 사용자가 입력한 문자를 버퍼에 저장
                         default:
                             sprintf(stdBuffer, "%s%c", stdBuffer, stdInput);
                             break;
@@ -175,29 +223,32 @@ int main()
     return 0;
 }
 
+// 서버에 연결 시도
 int connectToServer()
 {
-    struct sockaddr_in clientAddr;
-    memset(&clientAddr, '\0', sizeof(struct sockaddr_in));
-    clientAddr.sin_family = AF_INET;
-    clientAddr.sin_port = htons(PORT);
-    clientAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    struct sockaddr_in serverAddr;
+    memset(&serverAddr, '\0', sizeof(struct sockaddr_in));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(serverPort);
+    serverAddr.sin_addr.s_addr = inet_addr(serverAddress);
 
     if ((ServerSocket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     {
         perror("socket");
-        exit(1);
+        return -1;
     }
     printMessage(chatWindow, "Initiate socket");
 
-    if (connect(ServerSocket, (struct sockaddr *)&clientAddr, sizeof(struct sockaddr_in)))
+    if (connect(ServerSocket, (struct sockaddr *)&serverAddr, sizeof(struct sockaddr_in)) == -1)
     {
         perror("connect");
-        exit(1);
+        return -1;
     }
     printMessage(chatWindow, "Server connected");
+    return 0;
 }
 
+// 인터페이스 시작, 그리기
 void initInterface()
 {
     initscr();
@@ -230,6 +281,7 @@ void initInterface()
     wrefresh(commandWindowBorder);
 }
 
+// 인터페이스 테두리 그리기
 void drawBorder(WINDOW *window)
 {
     int x, y;
@@ -251,18 +303,21 @@ void drawBorder(WINDOW *window)
     }
 }   
 
+// 인터페이스에 메시지 출력
 void printMessage(WINDOW *window, char *message)
 {
     wprintw(window, "%s\n", message);
     wrefresh(window);
 }
 
+// 인터페이스에 발신자 이름과 함께 메시지 출력
 void printSenderMessage(WINDOW *window, char *message, char *sender)
 {
     wprintw(window, "[%s] %s\n", sender, message);
     wrefresh(window);
 }
 
+// 사용자로부터 받은 입력을 해석하여 처리함
 void receiveCommand()
 {
     switch (currentRequest)
@@ -270,36 +325,48 @@ void receiveCommand()
         case None:
             switch (clientStatus)
             {
+                // 로비에서 받은 입력
                 case Lobby:
                     switch (atoi(stdBuffer))
                     {
+                        // 현재 채팅방 목록 요청
                         case 1:
-                            requestChatRoomList("suwhan77", "tnghks77");
+                            requestChatRoomList();
                             break;
+                        // 채팅방 입장 요청
                         case 2:
                             currentRequest = RequestJoinChatRoom;
                             clientStatus = GetName;
                             break;
+                        // 채팅방 생성 요청
                         case 3:
                             currentRequest = RequestCreateChatRoom;
                             clientStatus = GetName;
                             break;
+                        // 채팅방 제거 요청
                         case 4:
                             currentRequest = RequestRemoveChatRoom;
                             clientStatus = GetName;
-                            requestRemoveChatRoom("room2", "password");
                             break;
+                        // 서버, 사용자 로그 요청
+                        case 5:
+                            requestConnectLog();
+                        // 프로그램 종료
                         default:
-                            break;
+                            close(ServerSocket);
+                            exit(0);
                     }
                     break;
                 
+                // 채팅방에서 받은 입력
                 case Chat:
+                    // 채팅방 퇴장 요청
                     if (stdBuffer[0] == '!')
                     {
                         if (strcmp(stdBuffer, "!quit") == 0)
                         requestQuitChatRoom(currentRoomName, currentUserName);
                     }
+                    // 채팅방에 메시지 전송
                     else
                     {
                         requestSendMessage(currentRoomName, currentUserName, stdBuffer);
@@ -312,7 +379,8 @@ void receiveCommand()
                     break;
             }
             break;
-            
+        
+        // 채팅방 참가 요청
         case RequestJoinChatRoom:
             if (clientStatus == GetName)
             {
@@ -341,7 +409,8 @@ void receiveCommand()
                 clientStatus = Lobby;
             }
             break;
-            
+        
+        // 채팅방 생성 요청
         case RequestCreateChatRoom:
             if (clientStatus == GetName)
             {
@@ -364,7 +433,8 @@ void receiveCommand()
                 clientStatus = Lobby;
             }
             break;
-            
+        
+        // 채팅방 삭제 요청
         case RequestRemoveChatRoom:
             if (clientStatus == GetName)
             {
@@ -392,57 +462,15 @@ void receiveCommand()
             currentRequest = None;
             break;            
     }
-
-    // switch (clientStatus)
-    // {
-    //     case Lobby:
-    //         switch (atoi(stdBuffer))
-    //         {
-    //             case 1:
-    //                 requestChatRoomList("suwhan77", "tnghks77");
-    //                 break;
-    //             case 2:
-    //                 clientStatus = GetName;
-    //                 requestJoinChatRoom("room1", "Amumu", "12345");
-    //                 break;
-    //             case 3:
-    //                 requestCreateChatRoom("room5", "Ralo", "qwert");
-    //                 break;
-    //             case 4:
-    //                 requestRemoveChatRoom("room2", "password");
-    //                 break;
-    //             default:
-    //                 break;
-    //         }
-    //         break;
-
-    //     case Chat:
-    //         if (stdBuffer[0] == '!')
-    //         {
-    //             if (strcmp(stdBuffer, "!quit") == 0)
-    //                 requestQuitChatRoom("room3", "Dopago");
-    //         }
-    //         else
-    //         {
-    //             requestSendMessage("Aloy", stdBuffer);
-    //         }
-    //         break;
-
-    //     case GetUserName:
-    //         break;
-    //     case GetPassword:
-    //         break;
-    //     case GetName:
-    //         break;
-    // }
 }
 
+// 현재 클라이언트 상황에 맞는 명령어 목록을 보여줌
 void showCommandList()
 {
     switch (clientStatus)
     {
         case Lobby:
-            showCustomCommand("1. ChatRoomList  2. JoinChatRoom  3. CreateChatRoom \n4. RemoveChatRoom  5. Exit", "Input Command");
+            showCustomCommand("1. ChatRoomList  2. JoinChatRoom  3. CreateChatRoom \n4. RemoveChatRoom  5. ConnectionLog  6. Exit", "Input Command");
             break;
         case Chat:
             showCustomCommand("say '!quit' to quit chat room", "Send Message");
@@ -459,6 +487,7 @@ void showCommandList()
     }
 }
 
+// 명령어 보여주기
 void showCustomCommand(char *command, char *inputGuide)
 {
     wclear(commandWindow);
@@ -471,20 +500,22 @@ void showCustomCommand(char *command, char *inputGuide)
     wrefresh(commandInputWindow);
 }
 
+// 서버로부터 DataPack을 받아 해석후 기능 수행
 int receiveResponse(struct DataPack *dataPack)
 {
-    // printf("command: '%d'\ndata1: '%s'\tdata2: '%s'\tdata3: '%s'\tdata4: '%s'\nmessage: '%s'\n",
-    //     dataPack->command, dataPack->data1, dataPack->data2, dataPack->data3, dataPack->data4, dataPack->message);
-
     switch (dataPack->command)
     {
+        // 채팅방 목록 요청
         case ResponseChatRoomList:
             wprintw(chatWindow, "%s\n", dataPack->message);
             wrefresh(chatWindow);
             break;
+        // 채팅방 참가 요청
         case ResponseJoinChatRoom:
+            wclear(chatWindow);
             wprintw(chatWindow, "[%s] %s\n", dataPack->data1, dataPack->message);
             wrefresh(chatWindow);
+            // 접속 성공
             if (dataPack->data4[0])
             {
                 strncpy(currentRoomName, dataPack->data1, sizeof(currentRoomName) - 1);
@@ -492,21 +523,31 @@ int receiveResponse(struct DataPack *dataPack)
                 clientStatus = Chat;
             }
             break;
+        // 채팅방 퇴장 요청
         case ResponseQuitChatRoom:
+            wclear(chatWindow);
             wprintw(chatWindow, "[%s] %s\n", dataPack->data1, dataPack->message);
             wrefresh(chatWindow);
             clientStatus = Lobby;
             break;
+        // 채팅방 생성 요청
         case ResponseCreateChatRoom:
             wprintw(chatWindow, "[%s] %s\n", dataPack->data1, dataPack->message);
             wrefresh(chatWindow);
             break;
+        // 채팅방 삭제 요청
         case ResponseRemoveChatRoom:
             wprintw(chatWindow, "[%s] %s\n", dataPack->data1, dataPack->message);
             wrefresh(chatWindow);
             break;
+        // 채팅방 메시지 전송 요청
         case ResponseSendMessage:
             wprintw(chatWindow, "[%s] %s\n", dataPack->data1, dataPack->message);
+            wrefresh(chatWindow);
+            break;
+        // 서버 시작 시간, 사용자 접속 시간 요청
+        case ResponseConnectLog:
+            wprintw(chatWindow, "%s\n", dataPack->message);
             wrefresh(chatWindow);
             break;
         default:
@@ -516,6 +557,7 @@ int receiveResponse(struct DataPack *dataPack)
     }
 }
 
+// 채팅방 목록 요청
 int requestChatRoomList()
 {
     struct DataPack dataPack;
@@ -523,6 +565,7 @@ int requestChatRoomList()
     requestDataPack(&dataPack);
 }
 
+// 채팅방 참가 요청
 int requestJoinChatRoom(char *roomName, char *userName, char *password)
 {
     struct DataPack dataPack;
@@ -534,6 +577,7 @@ int requestJoinChatRoom(char *roomName, char *userName, char *password)
     requestDataPack(&dataPack);
 }
 
+// 채팅방 퇴장 요청
 int requestQuitChatRoom(char *roomName, char *userName)
 {
     struct DataPack dataPack;
@@ -544,6 +588,7 @@ int requestQuitChatRoom(char *roomName, char *userName)
     requestDataPack(&dataPack);
 }
 
+// 채팅방 생성 요청
 int requestCreateChatRoom(char *roomName, char *password)
 {
     struct DataPack dataPack;
@@ -554,6 +599,7 @@ int requestCreateChatRoom(char *roomName, char *password)
     requestDataPack(&dataPack);
 }
 
+// 채팅방 삭제 요청
 int requestRemoveChatRoom(char *roomName, char *password)
 {
     struct DataPack dataPack;
@@ -564,6 +610,7 @@ int requestRemoveChatRoom(char *roomName, char *password)
     requestDataPack(&dataPack);
 }
 
+// 채팅방 메시지 전송 요청
 int requestSendMessage(char *roomName, char *userName, char *message)
 {
     struct DataPack dataPack;
@@ -575,6 +622,15 @@ int requestSendMessage(char *roomName, char *userName, char *message)
     requestDataPack(&dataPack);
 }
 
+// 서버 시작 시간, 사용자 접속 시간 요청
+int requestConnectLog()
+{
+    struct DataPack dataPack;
+    dataPack.command = RequestConnectLog;
+    requestDataPack(&dataPack);
+}
+
+// 서버에 DataPack 전송 도우미
 int requestDataPack(struct DataPack *dataPack)
 {
     int sendBytes;
@@ -591,6 +647,7 @@ int requestDataPack(struct DataPack *dataPack)
     return 0;
 }
 
+// 프로그램 종료 시 수행
 void onClose()
 {
     delwin(chatWindow);
@@ -599,77 +656,3 @@ void onClose()
     delwin(commandWindowBorder);
     endwin();
 }   
-
-
-// int requestRegister(char *userName, char *password)
-// {
-//     if (strlen(userName) < 1 || strlen(userName) > MAX_USERNAME_LENGTH ||
-//         strlen(password) < 1 || strlen(password) > MAX_PASSWORD_LENGTH)
-//     {
-//         printf("client: invalid input");
-//         return -1;
-//     }
-
-//     struct DataPack data;
-//     data.command = RequestRegister;
-//     strcpy(data.data1, userName);
-//     strcpy(data.data2, password);
-
-//     printf("command: '%d'\ndata1: '%s'\ndata2: '%s'\nmessage: '%s'\n",
-//         data.command, data.data1, data.data2, data.message);
-
-//     if (send(ServerSocket, (char *)&data, sizeof(struct DataPack), 0) == -1)
-//     {
-//         printf("%d\n", ServerSocket);
-//         perror("requestRegister: send");
-//         return -1;
-//     }
-
-//     return 0;
-// }
-
-// int requestLogin(char *userName, char *password)
-// {
-//     struct DataPack data;
-//     data.command = RequestLogin;
-//     strcpy(data.data1, userName);
-//     strcpy(data.data2, password);
-
-//     if (send(ServerSocket, (char *)&data, sizeof(struct DataPack), 0) == -1)
-//     {
-//         perror("requestLogin: send");
-//         return -1;
-//     }
-//     return 0;
-// }
-
-// int requestLogout(char *userName)
-// {
-//     struct DataPack data;
-//     data.command = RequestLogout;
-//     strcpy(data.data1, userName);
-
-//     if (send(ServerSocket, (char *)&data, sizeof(struct DataPack), 0) == -1)
-//     {
-//         perror("requestLogout: send");
-//         return -1;
-//     }
-//     return 0;
-// }
-
-// int requestSendMessage(int roomID, char *message)
-// {
-//     struct DataPack data;
-//     data.command = RequestSendMessage;
-//     sprintf(data.data1, "%d", roomID);
-//     strcpy(data.message, message);
-
-//     if (send(ServerSocket, (char *)&data, sizeof(struct DataPack), 0) == -1)
-//     {
-//         perror("requestSendMessage: send");
-//         return -1;
-//     }
-//     return 0;
-// }
-
-

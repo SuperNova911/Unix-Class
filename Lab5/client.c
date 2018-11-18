@@ -16,15 +16,16 @@
 
 enum Command 
 {
-     RequestChatRoomList, RequestJoinChatRoom, RequestQuitChatRoom,
-     RequestCreateChatRoom, RequestRemoveChatRoom, RequestSendMessage,
-     ResponseChatRoomList, ResponseJoinChatRoom, ResponseQuitChatRoom,
-     ResponseCreateChatRoom, ResponseRemoveChatRoom, ResponseSendMessage
+    None,
+    RequestChatRoomList, RequestJoinChatRoom, RequestQuitChatRoom,
+    RequestCreateChatRoom, RequestRemoveChatRoom, RequestSendMessage,
+    ResponseChatRoomList, ResponseJoinChatRoom, ResponseQuitChatRoom,
+    ResponseCreateChatRoom, ResponseRemoveChatRoom, ResponseSendMessage
 };
 
 enum ClientStatus
 {
-    Lobby, Chat
+    Lobby, Chat, GetUserName, GetPassword, GetName
 };
 
 struct DataPack
@@ -45,17 +46,21 @@ void initInterface();
 void drawBorder(WINDOW *window);
 void printMessage(WINDOW *window, char *message);
 void printSenderMessage(WINDOW *window, char *message, char *sender);
+
+// Command
 void receiveCommand();
 void showCommandList();
+void showCustomCommand(char *command, char *inputGuide);
+
 
 // DataPack
 int receiveResponse(struct DataPack *dataPack);
 int requestChatRoomList();
 int requestJoinChatRoom(char *roomName, char *userName, char *password);
 int requestQuitChatRoom(char *roomName, char *userName);
-int requestCreateChatRoom(char *roomName, char *userName, char *password);
+int requestCreateChatRoom(char *roomName, char *password);
 int requestRemoveChatRoom(char *roomName, char *password);
-int requestSendMessage(char *userName, char *message);
+int requestSendMessage(char *roomName, char *userName, char *message);
 int requestDataPack(struct DataPack *dataPack);
 
 // etc
@@ -69,6 +74,14 @@ fd_set reader;
 
 int stdInput;
 char stdBuffer[256] = { 0, };
+char userNameBuffer[256];
+char passwordBuffer[256];
+char roomNameBuffer[256];
+
+char currentUserName[256];
+char currentRoomName[256];
+
+enum Command currentRequest;
 enum ClientStatus clientStatus;
 
 int main()
@@ -89,9 +102,9 @@ int main()
     char socketBuffer[512];
     struct DataPack *receivedDataPack;
 
-    clientStatus = Lobby;
-
     
+    currentRequest = None;
+    clientStatus = Lobby;
 
     while (1)
     {
@@ -156,49 +169,7 @@ int main()
             }
         }
     }
-
-    // char command[256];
-    // while (1)
-    // {
-    //     sleep(1);
-    //     wclear(commandWindow);
-    //     wclear(commandInputWindow);
-    //     printMessage(commandWindow, "1. ChatRoomList  2. JoinChatRoom  3. QuitChatRoom \n4. CreateChatRoom  5. RemoveChatRoom  6. SendMessage  7. Exit");
-    //     printMessage(commandInputWindow, "Input Command: ");
-
-    //     echo();
-    //     curs_set(TRUE);
-    //     wscanw(commandInputWindow, "%s", command);
-    //     noecho();
-    //     curs_set(FALSE);
-    //     sleep(1);
-
-    //     switch (atoi(command))
-    //     {
-    //         case 1:
-    //             requestChatRoomList("suwhan77", "tnghks77");
-    //             continue;
-    //         case 2:
-    //             requestJoinChatRoom("1번방", "엄준식", "12345");
-    //             continue;
-    //         case 3:
-    //             requestQuitChatRoom("3번방", "정상길");
-    //             continue;
-    //         case 4:
-    //             requestCreateChatRoom("5번방", "김찬호", "qwert");
-    //             continue;
-    //         case 5:
-    //             requestRemoveChatRoom("2번방", "password");
-    //             continue;
-    //         case 6:
-    //             requestSendMessage("Aloy", "Happy Kappa");
-    //             continue;
-    //         default:
-    //             break;
-    //     }
-    //     break;
-    // }
-
+    
     close(ServerSocket);
 
     return 0;
@@ -294,41 +265,176 @@ void printSenderMessage(WINDOW *window, char *message, char *sender)
 
 void receiveCommand()
 {
-    switch (clientStatus)
+    switch (currentRequest)
     {
-        case Lobby:
-            switch (atoi(stdBuffer))
+        case None:
+            switch (clientStatus)
             {
-                case 1:
-                    requestChatRoomList("suwhan77", "tnghks77");
+                case Lobby:
+                    switch (atoi(stdBuffer))
+                    {
+                        case 1:
+                            requestChatRoomList("suwhan77", "tnghks77");
+                            break;
+                        case 2:
+                            currentRequest = RequestJoinChatRoom;
+                            clientStatus = GetName;
+                            break;
+                        case 3:
+                            currentRequest = RequestCreateChatRoom;
+                            clientStatus = GetName;
+                            break;
+                        case 4:
+                            currentRequest = RequestRemoveChatRoom;
+                            clientStatus = GetName;
+                            requestRemoveChatRoom("room2", "password");
+                            break;
+                        default:
+                            break;
+                    }
                     break;
-                case 2:
-                    requestJoinChatRoom("room1", "Amumu", "12345");
+                
+                case Chat:
+                    if (stdBuffer[0] == '!')
+                    {
+                        if (strcmp(stdBuffer, "!quit") == 0)
+                        requestQuitChatRoom(currentRoomName, currentUserName);
+                    }
+                    else
+                    {
+                        requestSendMessage(currentRoomName, currentUserName, stdBuffer);
+                    }
                     break;
-                case 3:
-                    requestCreateChatRoom("room5", "Ralo", "qwert");
-                    break;
-                case 4:
-                    requestRemoveChatRoom("room2", "password");
-                    break;
+                
                 default:
+                    currentRequest = None;
+                    clientStatus = Lobby;
                     break;
             }
             break;
-
-        case Chat:
-            if (stdBuffer[0] == '!')
+            
+        case RequestJoinChatRoom:
+            if (clientStatus == GetName)
             {
-                if (strcmp(stdBuffer, "!quit") == 0)
-                    requestQuitChatRoom("room3", "Dopago");
+                strncpy(roomNameBuffer, stdBuffer, sizeof(roomNameBuffer) - 1);
+                clientStatus = GetPassword;
+            }
+            else if (clientStatus == GetPassword)
+            {
+                strncpy(passwordBuffer, stdBuffer, sizeof(passwordBuffer) - 1);
+                clientStatus = GetUserName;
+            }
+            else if (clientStatus == GetUserName)
+            {
+                strncpy(userNameBuffer, stdBuffer, sizeof(userNameBuffer) - 1);
+                requestJoinChatRoom(roomNameBuffer, userNameBuffer, passwordBuffer);
+
+                currentRequest = None;
+                clientStatus = Lobby;
+                roomNameBuffer[0] = 0;
+                passwordBuffer[0] = 0;
+                userNameBuffer[0] = 0;
             }
             else
             {
-                requestSendMessage("Aloy", stdBuffer);
+                currentRequest = None;
+                clientStatus = Lobby;
             }
             break;
+            
+        case RequestCreateChatRoom:
+            if (clientStatus == GetName)
+            {
+                strncpy(roomNameBuffer, stdBuffer, sizeof(roomNameBuffer) - 1);
+                clientStatus = GetPassword;
+            }
+            else if (clientStatus == GetPassword)
+            {
+                strncpy(passwordBuffer, stdBuffer, sizeof(passwordBuffer) - 1);
+                requestCreateChatRoom(roomNameBuffer, passwordBuffer);
 
+                currentRequest = None;
+                clientStatus = Lobby;
+                roomNameBuffer[0] = 0;
+                passwordBuffer[0] = 0;
+            }
+            else
+            {
+                currentRequest = None;
+                clientStatus = Lobby;
+            }
+            break;
+            
+        case RequestRemoveChatRoom:
+            if (clientStatus == GetName)
+            {
+                strncpy(roomNameBuffer, stdBuffer, sizeof(roomNameBuffer) - 1);
+                clientStatus = GetPassword;
+            }
+            else if (clientStatus == GetPassword)
+            {
+                strncpy(passwordBuffer, stdBuffer, sizeof(passwordBuffer) - 1);
+                requestRemoveChatRoom(roomNameBuffer, passwordBuffer);
+
+                currentRequest = None;
+                clientStatus = Lobby;
+                roomNameBuffer[0] = 0;
+                passwordBuffer[0] = 0;
+            }
+            else
+            {
+                currentRequest = None;
+                clientStatus = Lobby;
+            }
+            break;
+            
+        default:
+            currentRequest = None;
+            break;            
     }
+
+    // switch (clientStatus)
+    // {
+    //     case Lobby:
+    //         switch (atoi(stdBuffer))
+    //         {
+    //             case 1:
+    //                 requestChatRoomList("suwhan77", "tnghks77");
+    //                 break;
+    //             case 2:
+    //                 clientStatus = GetName;
+    //                 requestJoinChatRoom("room1", "Amumu", "12345");
+    //                 break;
+    //             case 3:
+    //                 requestCreateChatRoom("room5", "Ralo", "qwert");
+    //                 break;
+    //             case 4:
+    //                 requestRemoveChatRoom("room2", "password");
+    //                 break;
+    //             default:
+    //                 break;
+    //         }
+    //         break;
+
+    //     case Chat:
+    //         if (stdBuffer[0] == '!')
+    //         {
+    //             if (strcmp(stdBuffer, "!quit") == 0)
+    //                 requestQuitChatRoom("room3", "Dopago");
+    //         }
+    //         else
+    //         {
+    //             requestSendMessage("Aloy", stdBuffer);
+    //         }
+    //         break;
+
+    //     case GetUserName:
+    //         break;
+    //     case GetPassword:
+    //         break;
+    //     case GetName:
+    //         break;
+    // }
 }
 
 void showCommandList()
@@ -336,21 +442,33 @@ void showCommandList()
     switch (clientStatus)
     {
         case Lobby:
-            wclear(commandWindow);
-            wclear(commandInputWindow);
-            printMessage(commandWindow, "1. ChatRoomList  2. JoinChatRoom  3. CreateChatRoom \n4. RemoveChatRoom  7. Exit");
-            wprintw(commandInputWindow, "Input Command: %s", stdBuffer);
-            wrefresh(commandInputWindow);
+            showCustomCommand("1. ChatRoomList  2. JoinChatRoom  3. CreateChatRoom \n4. RemoveChatRoom  5. Exit", "Input Command");
             break;
-        
         case Chat:
-            wclear(commandWindow);
-            wclear(commandInputWindow);
-            printMessage(commandWindow, "say '!quit' to quit chat room");
-            wprintw(commandInputWindow, "Send Message: %s", stdBuffer);
-            wrefresh(commandInputWindow);
+            showCustomCommand("say '!quit' to quit chat room", "Send Message");
+            break;
+        case GetUserName:
+            showCustomCommand("Type your name", "UserName");
+            break;
+        case GetPassword:
+            showCustomCommand("Type chat room password (If public chat room, skip this step)", "Password");
+            break;
+        case GetName:
+            showCustomCommand("Type chat room name", "RoomName");
             break;
     }
+}
+
+void showCustomCommand(char *command, char *inputGuide)
+{
+    wclear(commandWindow);
+    wclear(commandInputWindow);
+
+    wprintw(commandWindow, command);
+    wprintw(commandInputWindow, "%s: %s", inputGuide, stdBuffer);
+
+    wrefresh(commandWindow);
+    wrefresh(commandInputWindow);
 }
 
 int receiveResponse(struct DataPack *dataPack)
@@ -369,6 +487,8 @@ int receiveResponse(struct DataPack *dataPack)
             wrefresh(chatWindow);
             if (dataPack->data4[0])
             {
+                strncpy(currentRoomName, dataPack->data1, sizeof(currentRoomName) - 1);
+                strncpy(currentUserName, dataPack->data2, sizeof(currentUserName) - 1);
                 clientStatus = Chat;
             }
             break;
@@ -424,13 +544,12 @@ int requestQuitChatRoom(char *roomName, char *userName)
     requestDataPack(&dataPack);
 }
 
-int requestCreateChatRoom(char *roomName, char *userName, char *password)
+int requestCreateChatRoom(char *roomName, char *password)
 {
     struct DataPack dataPack;
     dataPack.command = RequestCreateChatRoom;
     strncpy(dataPack.data1, roomName, sizeof(dataPack.data1) - 1);
-    strncpy(dataPack.data2, userName, sizeof(dataPack.data2) - 1);
-    strncpy(dataPack.data3, password, sizeof(dataPack.data3) - 1);
+    strncpy(dataPack.data2, password, sizeof(dataPack.data2) - 1);
 
     requestDataPack(&dataPack);
 }
@@ -445,11 +564,12 @@ int requestRemoveChatRoom(char *roomName, char *password)
     requestDataPack(&dataPack);
 }
 
-int requestSendMessage(char *userName, char *message)
+int requestSendMessage(char *roomName, char *userName, char *message)
 {
     struct DataPack dataPack;
     dataPack.command = RequestSendMessage;
-    strncpy(dataPack.data1, userName, sizeof(dataPack.data1) - 1);
+    strncpy(dataPack.data1, roomName, sizeof(dataPack.data1) - 1);
+    strncpy(dataPack.data2, userName, sizeof(dataPack.data2) - 1);
     strncpy(dataPack.message, message, sizeof(dataPack.message) - 1);
 
     requestDataPack(&dataPack);
